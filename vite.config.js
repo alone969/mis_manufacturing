@@ -1,3 +1,4 @@
+import path from 'path';
 import { defineConfig } from 'vite';
 import laravel from 'laravel-vite-plugin';
 import { bunny } from 'laravel-vite-plugin/fonts';
@@ -18,6 +19,11 @@ export default defineConfig({
         tailwindcss(),
         react(),
     ],
+    resolve: {
+        alias: {
+            '@': path.resolve(__dirname, './resources/js'),
+        },
+    },
     server: {
         watch: {
             ignored: ['**/storage/framework/views/**'],
