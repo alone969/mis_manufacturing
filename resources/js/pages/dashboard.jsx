@@ -43,8 +43,10 @@ function getStatusVariant(status) {
   }
 }
 
-export default function Dashboard() {
+export default function Dashboard({ user, onLogout, onViewAccount }) {
   const [search, setSearch] = useState("");
+  const isAdmin = user?.role === "admin";
+  const isManager = user?.role === "manager" || isAdmin;
 
   const filteredOrders = recentOrders.filter(
     (order) =>
@@ -59,7 +61,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-            <p className="text-muted-foreground">Welcome back! Here's an overview of your store.</p>
+            <p className="text-muted-foreground">Welcome back{user ? `, ${user.name}` : ''}! Here's an overview of your store.</p>
           </div>
           <div className="flex items-center gap-4">
             <Input
@@ -68,7 +70,12 @@ export default function Dashboard() {
               onChange={(e) => setSearch(e.target.value)}
               className="w-64"
             />
-            <Button>Add Product</Button>
+            {isManager && <Button>Add Product</Button>}
+            {isAdmin && (
+              <Badge variant="outline" className="capitalize">{user.role}</Badge>
+            )}
+            <Button variant="outline" onClick={onViewAccount}>Account</Button>
+            <Button variant="outline" onClick={onLogout}>Logout</Button>
           </div>
         </div>
 
@@ -149,12 +156,34 @@ export default function Dashboard() {
           </Card>
         </div>
 
+        {/* Admin Panel - Only visible to admins */}
+        {isAdmin && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Admin Panel
+                <Badge variant="destructive">Admin Only</Badge>
+              </CardTitle>
+              <CardDescription>Manage users and system settings.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-4">
+                This section is restricted to administrators only. You can manage users, roles, and system settings here.
+              </p>
+              <Button variant="outline">Manage Users</Button>
+            </CardContent>
+          </Card>
+        )}
+
         <Separator />
 
         {/* Footer */}
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <p>Built with shadcn/ui + React + Laravel</p>
-          <Button variant="ghost" size="sm">View All Orders →</Button>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="capitalize">{user?.role || 'employee'}</Badge>
+            <Button variant="ghost" size="sm">View All Orders →</Button>
+          </div>
         </div>
       </div>
     </div>
