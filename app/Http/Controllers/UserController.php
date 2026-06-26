@@ -21,6 +21,19 @@ class UserController extends Controller
     }
 
     /**
+     * List users for messaging (all authenticated roles).
+     */
+    public function forMessaging(Request $request): JsonResponse
+    {
+        $users = User::select('id', 'name', 'email', 'role')
+            ->where('id', '!=', $request->user()->id)
+            ->orderBy('name')
+            ->get();
+
+        return response()->json($users);
+    }
+
+    /**
      * Update a user's role (admin only).
      */
     public function updateRole(Request $request, User $user): JsonResponse

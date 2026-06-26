@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\DeviceLog;
 use App\Models\LoginLog;
 use App\Models\Otp;
 use App\Models\User;
@@ -37,6 +38,9 @@ class AuthController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
+        // Record device login
+        DeviceLog::recordLogin($user, $request->ip(), $request->userAgent());
+
         return response()->json([
             'user' => [
                 'id' => $user->id,
@@ -61,10 +65,88 @@ class AuthController extends Controller
             'role' => $user->role,
             'is_email_verified' => $user->is_email_verified,
             'onboarding_status' => $user->onboarding_status,
+            'settings' => $user->settings,
             'created_at' => $user->created_at,
             'updated_at' => $user->updated_at,
         ]);
     }
+
+    /**
+     * Update the authenticated user's profile.
+     */
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $request->validate([
+            'name' => 'sometimes|string|max:255',
+            'email' => 'sometimes|email|unique:users,email,' . $user->id,
+        ]);
+
+        $user->update($request->only(['name', 'email']));
+
+        return response()->json([
+            'message' => 'Profile updated successfully.',
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+            ],
+        ]);
+    }
+
+    /**
+     * Change the authenticated user's password.
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'current_password' => 'required|string',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $user = $request->user();
+
+        if (! Hash::check($request->current_password, $user->password)) {
+            return response()->json([
+                'message' => 'The current password is incorrect.',
+            ], 422);
+        }
+
+        $user->update(['password' => $request->password]);
+
+        return response()->json([
+            'message' => 'Password changed successfully.',
+        ]);
+    }
+
+    /**
+     * Update the authenticated user's settings/preferences.
+     */
+    public function updateSettings(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $request->validate([
+            'settings' => 'required|array',
+            'settings.language' => 'sometimes|string|in:en,es,fr,de,ar',
+            'settings.email_notifications' => 'sometimes|boolean',
+            'settings.shift_reminders' => 'sometimes|boolean',
+            'settings.theme' => 'sometimes|string|in:light,dark,system',
+        ]);
+
+        $currentSettings = $user->settings ?? [];
+        $newSettings = array_merge($currentSettings, $request->settings);
+
+        $user->update(['settings' => $newSettings]);
+
+        return response()->json([
+            'message' => 'Settings updated successfully.',
+            'settings' => $newSettings,
+        ]);
+    }
+
     /**
      * Send a password reset OTP to the user's email.
      */
@@ -86,10 +168,10 @@ class AuthController extends Controller
         // Generate password reset OTP
         $result = Otp::generate($user, 'password_reset', 6, 10);
 
-        // In production, send email here. For dev, return the code in response.
+        // TODO: In production, send email with the code via a mailer.
+        // $result['code'] contains the plain-text OTP — do NOT expose it in the response.
         return response()->json([
             'message' => 'If an account exists with that email, a reset code has been sent.',
-            'code' => $result['code'], // Remove this line in production
         ]);
     }
 
@@ -157,6 +239,9 @@ class AuthController extends Controller
         Auth::login($user);
 
         $request->session()->regenerate();
+
+        // Record device login
+        DeviceLog::recordLogin($user, $request->ip(), $request->userAgent());
 
         return response()->json([
             'user' => [

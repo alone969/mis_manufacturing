@@ -6,6 +6,15 @@ import ForgotPassword from '@/pages/forgot-password';
 import ResetPassword from '@/pages/reset-password';
 import Dashboard from '@/pages/dashboard';
 import Account from '@/pages/account';
+import Shifts from '@/pages/shifts';
+import Stock from '@/pages/stock';
+import Salaries from '@/pages/salaries';
+import Employees from '@/pages/employees';
+import ActivityLog from '@/pages/activity-log';
+import Messages from '@/pages/messages';
+import DeviceLogs from '@/pages/device-logs';
+import Notifications from '@/pages/notifications';
+import Settings from '@/pages/settings';
 import { authHeaders } from '@/lib/utils';
 
 function App() {
@@ -55,6 +64,9 @@ function App() {
         setView('dashboard');
     };
 
+    const navigateTo = (page) => setView(page);
+    const backToDashboard = () => setView('dashboard');
+
     if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background">
@@ -76,11 +88,30 @@ function App() {
         return <Login onLogin={handleLogin} onSwitchToRegister={() => setView('register')} onSwitchToForgotPassword={() => setView('forgot-password')} onSwitchToResetPassword={() => setView('reset-password')} />;
     }
 
-    if (view === 'account') {
-        return <Account onBack={() => setView('dashboard')} />;
+    switch (view) {
+        case 'account':
+            return <Account onBack={backToDashboard} />;
+        case 'shifts':
+            return <Shifts onBack={backToDashboard} user={user} />;
+        case 'stock':
+            return <Stock onBack={backToDashboard} user={user} />;
+        case 'salaries':
+            return <Salaries onBack={backToDashboard} />;
+        case 'employees':
+            return <Employees onBack={backToDashboard} />;
+        case 'activity':
+            return <ActivityLog onBack={backToDashboard} />;
+        case 'messages':
+            return <Messages onBack={backToDashboard} />;
+        case 'device-logs':
+            return <DeviceLogs onBack={backToDashboard} />;
+        case 'notifications':
+            return <Notifications onBack={backToDashboard} />;
+        case 'settings':
+            return <Settings onBack={backToDashboard} user={user} />;
+        default:
+            return <Dashboard user={user} onLogout={handleLogout} onViewAccount={() => navigateTo('account')} onNavigate={navigateTo} />;
     }
-
-    return <Dashboard user={user} onLogout={handleLogout} onViewAccount={() => setView('account')} />;
 }
 
 const root = createRoot(document.getElementById('app'));

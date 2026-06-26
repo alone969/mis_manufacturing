@@ -1,58 +1,85 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-
-const stats = [
-  { title: "Total Revenue", value: "$45,231.89", change: "+20.1%", trend: "up" },
-  { title: "Subscriptions", value: "+2,350", change: "+180.1%", trend: "up" },
-  { title: "Active Users", value: "+12,234", change: "+19%", trend: "up" },
-  { title: "Bounce Rate", value: "21.3%", change: "-4.5%", trend: "down" },
-];
-
-const recentOrders = [
-  { id: "ORD-7352", customer: "Olivia Martin", email: "olivia.martin@email.com", status: "Completed", amount: "$316.00" },
-  { id: "ORD-7353", customer: "Jackson Lee", email: "jackson.lee@email.com", status: "Processing", amount: "$242.00" },
-  { id: "ORD-7354", customer: "Isabella Nguyen", email: "isabella.nguyen@email.com", status: "Completed", amount: "$837.00" },
-  { id: "ORD-7355", customer: "William Kim", email: "will@email.com", status: "Pending", amount: "$721.00" },
-  { id: "ORD-7356", customer: "Sofia Davis", email: "sofia.davis@email.com", status: "Completed", amount: "$543.00" },
-];
-
-const recentActivity = [
-  { user: "OL", name: "Olivia Martin", action: "created a new order", time: "2 minutes ago" },
-  { user: "JL", name: "Jackson Lee", action: "updated their profile", time: "5 minutes ago" },
-  { user: "IN", name: "Isabella Nguyen", action: "completed payment", time: "12 minutes ago" },
-  { user: "WK", name: "William Kim", action: "submitted a support ticket", time: "1 hour ago" },
-  { user: "SD", name: "Sofia Davis", action: "placed a new order", time: "2 hours ago" },
-];
+import { authHeaders } from "@/lib/utils";
 
 function getStatusVariant(status) {
   switch (status) {
-    case "Completed":
-      return "default";
-    case "Processing":
-      return "secondary";
-    case "Pending":
-      return "outline";
-    default:
-      return "default";
+    case "clocked_in": return "default";
+    case "clocked_out": return "secondary";
+    case "scheduled": return "outline";
+    case "absent": return "destructive";
+    default: return "default";
   }
 }
 
-export default function Dashboard({ user, onLogout, onViewAccount }) {
+function getStockVariant(quantity) {
+  if (quantity < 5) return "destructive";
+  if (quantity < 10) return "outline";
+  return "default";
+}
+
+export default function Dashboard({ user, onLogout, onViewAccount, onNavigate }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [unreadMsgCount, setUnreadMsgCount] = useState(0);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+
   const isAdmin = user?.role === "admin";
   const isManager = user?.role === "manager" || isAdmin;
 
-  const filteredOrders = recentOrders.filter(
-    (order) =>
-      order.customer.toLowerCase().includes(search.toLowerCase()) ||
-      order.id.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    fetch("/api/dashboard", {
+      headers: authHeaders(),
+      credentials: "same-origin",
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load dashboard");
+        return res.json();
+      })
+      .then((d) => setData(d))
+      .catch(() => setError("Could not load dashboard data."))
+      .finally(() => setLoading(false));
+
+    // Load badge counts
+    fetch("/api/messages/unread-count", { headers: authHeaders(), credentials: "same-origin" })
+      .then(r => r.json())
+      .then(d => setUnreadMsgCount(d.unread_count || 0))
+      .catch(() => {});
+
+    fetch("/api/notifications/unread-count", { headers: authHeaders(), credentials: "same-origin" })
+      .then(r => r.json())
+      .then(d => setUnreadNotifCount(d.unread_count || 0))
+      .catch(() => {});
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-muted-foreground">Loading dashboard...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-md">
+          <CardContent className="pt-6 text-center">
+            <p className="text-destructive mb-4">{error}</p>
+            <Button variant="outline" onClick={onLogout}>Logout</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background p-6 lg:p-8">
@@ -61,131 +88,321 @@ export default function Dashboard({ user, onLogout, onViewAccount }) {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-            <p className="text-muted-foreground">Welcome back{user ? `, ${user.name}` : ''}! Here's an overview of your store.</p>
+            <p className="text-muted-foreground">Welcome back{user ? `, ${user.name}` : ''}! Here's your overview.</p>
           </div>
-          <div className="flex items-center gap-4">
-            <Input
-              placeholder="Search orders..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-64"
-            />
-            {isManager && <Button>Add Product</Button>}
-            {isAdmin && (
-              <Badge variant="outline" className="capitalize">{user.role}</Badge>
-            )}
-            <Button variant="outline" onClick={onViewAccount}>Account</Button>
-            <Button variant="outline" onClick={onLogout}>Logout</Button>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {/* Primary navigation */}
+            {isAdmin && <Button size="sm" onClick={() => onNavigate("employees")}>Employees</Button>}
+            {isManager && <Button size="sm" onClick={() => onNavigate("shifts")}>Shifts</Button>}
+            {isAdmin && <Button size="sm" onClick={() => onNavigate("stock")}>Stock</Button>}
+            {isAdmin && <Button size="sm" onClick={() => onNavigate("salaries")}>Salaries</Button>}
+            {isAdmin && <Button size="sm" variant="outline" onClick={() => onNavigate("activity")}>Activity Log</Button>}
+
+            <Separator orientation="vertical" className="h-6" />
+
+            {/* User tools */}
+            <Button size="sm" variant="outline" onClick={() => onNavigate("messages")}>
+              Messages
+              {unreadMsgCount > 0 && <Badge variant="destructive" className="ml-1 text-xs px-1">{unreadMsgCount}</Badge>}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => onNavigate("notifications")}>
+              Notifications
+              {unreadNotifCount > 0 && <Badge variant="destructive" className="ml-1 text-xs px-1">{unreadNotifCount}</Badge>}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => onNavigate("device-logs")}>Devices</Button>
+            <Button size="sm" variant="outline" onClick={() => onNavigate("settings")}>Settings</Button>
+
+            <Separator orientation="vertical" className="h-6" />
+
+            <Badge variant="outline" className="capitalize">{user?.role}</Badge>
+            <Button size="sm" variant="outline" onClick={onViewAccount}>Account</Button>
+            <Button size="sm" variant="outline" onClick={onLogout}>Logout</Button>
           </div>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {stats.map((stat) => (
-            <Card key={stat.title}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{stat.title}</CardTitle>
-                <Badge variant={stat.trend === "up" ? "default" : "secondary"} className="text-xs">
-                  {stat.change}
-                </Badge>
+        {/* ── Admin Dashboard ────────────────────────────────────── */}
+        {isAdmin && data?.stats && (
+          <>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Employees</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{data.stats.total_employees}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Active Shifts Today</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{data.stats.active_shifts_today}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Stock Items</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{data.stats.total_stock_items}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Pending Salaries</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{data.stats.pending_salaries}</div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-7">
+              {/* Today's Shifts */}
+              <Card className="lg:col-span-4">
+                <CardHeader>
+                  <CardTitle>Today's Shifts</CardTitle>
+                  <CardDescription>Shift assignments for today.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {data.today_shifts?.length > 0 ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Employee</TableHead>
+                          <TableHead>Shift</TableHead>
+                          <TableHead>Time</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {data.today_shifts.map((s, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="font-medium">{s.employee}</TableCell>
+                            <TableCell>{s.shift}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{s.start} – {s.end}</TableCell>
+                            <TableCell>
+                              <Badge variant={getStatusVariant(s.status)} className="capitalize">{s.status.replace("_", " ")}</Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No shifts scheduled for today.</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Stock Alerts */}
+              <Card className="lg:col-span-3">
+                <CardHeader>
+                  <CardTitle>Stock Alerts</CardTitle>
+                  <CardDescription>Items running low.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {data.stock_alerts?.length > 0 ? (
+                    <div className="space-y-4">
+                      {data.stock_alerts.map((item, i) => (
+                        <div key={i} className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium">{item.name}</p>
+                            <p className="text-xs text-muted-foreground">{item.type.replace("_", " ")}</p>
+                          </div>
+                          <Badge variant={getStockVariant(item.quantity)}>
+                            {item.quantity} {item.unit}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">All stock levels are adequate.</p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Recent Activity */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Recent Activity</CardTitle>
+                <CardDescription>Latest actions across the system.</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stat.value}</div>
+                {data.recent_activity?.length > 0 ? (
+                  <div className="space-y-4">
+                    {data.recent_activity.map((a, i) => (
+                      <div key={i} className="flex items-center gap-4">
+                        <Avatar className="h-9 w-9">
+                          <AvatarFallback>{a.user?.split(" ").map(n => n[0]).join("")}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 space-y-1">
+                          <p className="text-sm font-medium leading-none">
+                            {a.user}{" "}
+                            <span className="text-muted-foreground font-normal">{a.description || a.action}</span>
+                          </p>
+                          <p className="text-sm text-muted-foreground">{a.time}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No recent activity.</p>
+                )}
               </CardContent>
             </Card>
-          ))}
-        </div>
+          </>
+        )}
 
-        <div className="grid gap-6 lg:grid-cols-7">
-          {/* Recent Orders Table */}
-          <Card className="lg:col-span-4">
-            <CardHeader>
-              <CardTitle>Recent Orders</CardTitle>
-              <CardDescription>You made {recentOrders.length} orders this month.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Order</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredOrders.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.id}</TableCell>
-                      <TableCell>{order.customer}</TableCell>
-                      <TableCell>
-                        <Badge variant={getStatusVariant(order.status)}>{order.status}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right">{order.amount}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+        {/* ── Manager Dashboard ──────────────────────────────────── */}
+        {isManager && !isAdmin && data?.stats && (
+          <>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Card>
+                <CardHeader><CardTitle className="text-sm font-medium">Team Members</CardTitle></CardHeader>
+                <CardContent><div className="text-2xl font-bold">{data.stats.team_members}</div></CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle className="text-sm font-medium">Active Shifts Today</CardTitle></CardHeader>
+                <CardContent><div className="text-2xl font-bold">{data.stats.active_shifts_today}</div></CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle className="text-sm font-medium">Total Stock</CardTitle></CardHeader>
+                <CardContent><div className="text-2xl font-bold">{data.stats.total_stock_items}</div></CardContent>
+              </Card>
+            </div>
+            {data.today_shifts?.length > 0 && (
+              <Card>
+                <CardHeader><CardTitle>Today's Shifts</CardTitle></CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Employee</TableHead>
+                        <TableHead>Shift</TableHead>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data.today_shifts.map((s, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="font-medium">{s.employee}</TableCell>
+                          <TableCell>{s.shift}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{s.start} – {s.end}</TableCell>
+                          <TableCell><Badge variant={getStatusVariant(s.status)} className="capitalize">{s.status.replace("_", " ")}</Badge></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
+          </>
+        )}
 
-          {/* Recent Activity */}
-          <Card className="lg:col-span-3">
-            <CardHeader>
-              <CardTitle>Recent Activity</CardTitle>
-              <CardDescription>Latest actions from your team.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                {recentActivity.map((activity, i) => (
-                  <div key={i} className="flex items-center gap-4">
-                    <Avatar className="h-9 w-9">
-                      <AvatarFallback>{activity.user}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 space-y-1">
-                      <p className="text-sm font-medium leading-none">
-                        {activity.name}{" "}
-                        <span className="text-muted-foreground font-normal">{activity.action}</span>
-                      </p>
-                      <p className="text-sm text-muted-foreground">{activity.time}</p>
+        {/* ── Employee Dashboard ─────────────────────────────────── */}
+        {!isManager && data?.stats && (
+          <>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Card>
+                <CardHeader><CardTitle className="text-sm font-medium">Today's Shift</CardTitle></CardHeader>
+                <CardContent><div className="text-2xl font-bold">{data.stats.today_shift}</div></CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle className="text-sm font-medium">Attendance This Week</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{data.stats.attendance_this_week}/{data.stats.total_shifts_this_week}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle className="text-sm font-medium">My Shift</CardTitle></CardHeader>
+                <CardContent>
+                  {data.today_shift ? (
+                    <div className="space-y-2">
+                      <p className="text-lg font-semibold">{data.today_shift.shift}</p>
+                      <p className="text-sm text-muted-foreground">{data.today_shift.start} – {data.today_shift.end}</p>
+                      <Badge variant={getStatusVariant(data.today_shift.status)} className="capitalize">
+                        {data.today_shift.status.replace("_", " ")}
+                      </Badge>
+                      {data.today_shift.status === "scheduled" && (
+                        <Button size="sm" onClick={() => clockIn(data.today_shift.assignment_id)}>
+                          Clock In
+                        </Button>
+                      )}
+                      {data.today_shift.status === "clocked_in" && (
+                        <Button size="sm" variant="outline" onClick={() => clockOut(data.today_shift.assignment_id)}>
+                          Clock Out
+                        </Button>
+                      )}
                     </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+                  ) : (
+                    <p className="text-muted-foreground">No shift today.</p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
 
-        {/* Admin Panel - Only visible to admins */}
-        {isAdmin && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                Admin Panel
-                <Badge variant="destructive">Admin Only</Badge>
-              </CardTitle>
-              <CardDescription>Manage users and system settings.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground mb-4">
-                This section is restricted to administrators only. You can manage users, roles, and system settings here.
-              </p>
-              <Button variant="outline">Manage Users</Button>
-            </CardContent>
-          </Card>
+            {data.recent_attendance?.length > 0 && (
+              <Card>
+                <CardHeader><CardTitle>Recent Attendance</CardTitle></CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Shift</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Clock In</TableHead>
+                        <TableHead>Clock Out</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data.recent_attendance.map((a, i) => (
+                        <TableRow key={i}>
+                          <TableCell>{a.date}</TableCell>
+                          <TableCell>{a.shift}</TableCell>
+                          <TableCell><Badge variant={getStatusVariant(a.status)} className="capitalize">{a.status.replace("_", " ")}</Badge></TableCell>
+                          <TableCell>{a.clock_in || "—"}</TableCell>
+                          <TableCell>{a.clock_out || "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
+          </>
         )}
 
         <Separator />
-
-        {/* Footer */}
         <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <p>Built with shadcn/ui + React + Laravel</p>
-          <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="capitalize">{user?.role || 'employee'}</Badge>
-            <Button variant="ghost" size="sm">View All Orders →</Button>
-          </div>
+          <p>MIS Manufacturing — {user?.role}</p>
         </div>
       </div>
     </div>
   );
+
+  function clockIn(assignmentId) {
+    fetch(`/api/shifts/${assignmentId}/clock-in`, {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "same-origin",
+    })
+      .then((res) => res.json())
+      .then(() => window.location.reload())
+      .catch(() => {});
+  }
+
+  function clockOut(assignmentId) {
+    fetch(`/api/shifts/${assignmentId}/clock-out`, {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "same-origin",
+    })
+      .then((res) => res.json())
+      .then(() => window.location.reload())
+      .catch(() => {});
+  }
 }
