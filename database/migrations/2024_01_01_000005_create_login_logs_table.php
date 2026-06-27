@@ -19,7 +19,7 @@ return new class extends Migration
             $table->string('device_name')->nullable();
             $table->enum('status', ['success', 'failed', 'blocked'])->default('success');
             $table->string('failure_reason')->nullable(); // invalid_credentials, email_not_verified, account_locked
-            $table->timestamp('created_at');
+            $table->timestamps();
 
             $table->index(['user_id', 'status']);
             $table->index('created_at');

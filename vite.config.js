@@ -25,12 +25,16 @@ export default defineConfig({
         },
     },
     server: {
-        host: '127.0.0.1',
+        https: {
+            key: 'C:\\Users\\Asus\\.config\\herd\\config\\valet\\Certificates\\mis_manufacturing.test.key',
+            cert: 'C:\\Users\\Asus\\.config\\herd\\config\\valet\\Certificates\\mis_manufacturing.test.crt',
+        },
+        host: 'mis_manufacturing.test',
         watch: {
             ignored: ['**/storage/framework/views/**'],
         },
         hmr: {
-            host: '127.0.0.1',
+            host: 'mis_manufacturing.test',
         },
     },
 });
