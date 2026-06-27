@@ -3,19 +3,42 @@
 namespace App\Models;
 
 use Database\Factories\UserFactory;
-use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
+use Spatie\Permission\Traits\HasRoles;
 
-#[Fillable(['name', 'email', 'password', 'role', 'is_email_verified', 'onboarding_status', 'settings'])]
-#[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable, HasRoles;
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var array<int, string>
+     */
+    protected $fillable = [
+        'name',
+        'email',
+        'password',
+        'role',
+        'is_email_verified',
+        'onboarding_status',
+        'settings',
+    ];
+
+    /**
+     * The attributes that should be hidden for serialization.
+     *
+     * @var array<int, string>
+     */
+    protected $hidden = [
+        'password',
+        'remember_token',
+    ];
 
     /**
      * Get the attributes that should be cast.
@@ -27,25 +50,57 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
-            'is_email_verified' => 'boolean',
             'settings' => 'array',
+            'is_email_verified' => 'boolean',
         ];
     }
 
     /**
-     * Get the OTPs for the user.
+     * Get the shift assignments for the user.
      */
-    public function otps(): HasMany
+    public function shiftAssignments(): HasMany
     {
-        return $this->hasMany(Otp::class);
+        return $this->hasMany(ShiftAssignment::class);
     }
 
     /**
-     * Get the login logs for the user.
+     * Get the salary records for the user.
      */
-    public function loginLogs(): HasMany
+    public function salaries(): HasMany
     {
-        return $this->hasMany(LoginLog::class);
+        return $this->hasMany(Salary::class);
+    }
+
+    /**
+     * Get the sent messages for the user.
+     */
+    public function sentMessages(): HasMany
+    {
+        return $this->hasMany(Message::class, 'sender_id');
+    }
+
+    /**
+     * Get the received messages for the user.
+     */
+    public function receivedMessages(): HasMany
+    {
+        return $this->hasMany(Message::class, 'receiver_id');
+    }
+
+    /**
+     * Get the notifications for the user.
+     */
+    public function notifications(): HasMany
+    {
+        return $this->hasMany(Notification::class);
+    }
+
+    /**
+     * Get the activity logs for the user.
+     */
+    public function activityLogs(): HasMany
+    {
+        return $this->hasMany(ActivityLog::class);
     }
 
     /**
@@ -54,69 +109,5 @@ class User extends Authenticatable
     public function deviceLogs(): HasMany
     {
         return $this->hasMany(DeviceLog::class);
-    }
-
-    /**
-     * Check if user has a specific role.
-     */
-    public function hasRole(string $role): bool
-    {
-        return $this->role === $role;
-    }
-
-    /**
-     * Check if user is an admin.
-     */
-    public function isAdmin(): bool
-    {
-        return $this->hasRole('admin');
-    }
-
-    /**
-     * Check if user is a manager.
-     */
-    public function isManager(): bool
-    {
-        return $this->hasRole('manager');
-    }
-
-    /**
-     * Check if user is an employee.
-     */
-    public function isEmployee(): bool
-    {
-        return $this->hasRole('employee');
-    }
-
-    /**
-     * Check if user's email is verified.
-     */
-    public function isEmailVerified(): bool
-    {
-        return $this->is_email_verified;
-    }
-
-    /**
-     * Mark user's email as verified.
-     */
-    public function markEmailAsVerified(): void
-    {
-        $this->update(['is_email_verified' => true]);
-    }
-
-    /**
-     * Check if onboarding is completed.
-     */
-    public function isOnboardingCompleted(): bool
-    {
-        return $this->onboarding_status === 'completed';
-    }
-
-    /**
-     * Get the current active device.
-     */
-    public function currentDevice(): ?DeviceLog
-    {
-        return $this->deviceLogs()->current()->first();
     }
 }

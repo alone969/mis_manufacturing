@@ -17,6 +17,7 @@ class ShiftAssignment extends Model
         'clock_in',
         'clock_out',
         'status',
+        'notes',
     ];
 
     protected function casts(): array
@@ -28,41 +29,50 @@ class ShiftAssignment extends Model
         ];
     }
 
-    /**
-     * Get the user this assignment belongs to.
-     */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    /**
-     * Get the shift this assignment belongs to.
-     */
     public function shift(): BelongsTo
     {
         return $this->belongsTo(Shift::class);
     }
 
     /**
-     * Clock in the employee.
+     * Clock in the user for this shift assignment.
      */
-    public function clockIn(): void
+    public function clockIn(): bool
     {
+        if ($this->clock_in) {
+            return false; // Already clocked in
+        }
+
+        $now = now();
+        $shiftStart = $this->date->copy()->setTimeFromTimeString($this->shift->start_time);
+        $isLate = $now->gt($shiftStart->addMinutes(5)); // 5-minute grace period
+
         $this->update([
-            'clock_in' => now(),
-            'status' => 'clocked_in',
+            'clock_in' => $now,
+            'status' => $isLate ? 'late' : 'present',
         ]);
+
+        return true;
     }
 
     /**
-     * Clock out the employee.
+     * Clock out the user for this shift assignment.
      */
-    public function clockOut(): void
+    public function clockOut(): bool
     {
+        if (! $this->clock_in || $this->clock_out) {
+            return false; // Not clocked in or already clocked out
+        }
+
         $this->update([
             'clock_out' => now(),
-            'status' => 'clocked_out',
         ]);
+
+        return true;
     }
 }

@@ -14,9 +14,8 @@ class Notification extends Model
         'user_id',
         'type',
         'title',
-        'body',
-        'entity_type',
-        'entity_id',
+        'message',
+        'data',
         'is_read',
         'read_at',
     ];
@@ -24,21 +23,19 @@ class Notification extends Model
     protected function casts(): array
     {
         return [
+            'data' => 'array',
             'is_read' => 'boolean',
             'read_at' => 'datetime',
         ];
     }
 
-    /**
-     * Get the user this notification belongs to.
-     */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
     /**
-     * Mark notification as read.
+     * Mark the notification as read.
      */
     public function markAsRead(): void
     {
@@ -48,34 +45,5 @@ class Notification extends Model
                 'read_at' => now(),
             ]);
         }
-    }
-
-    /**
-     * Check if notification is unread.
-     */
-    public function isUnread(): bool
-    {
-        return ! $this->is_read;
-    }
-
-    /**
-     * Create a notification for a user.
-     */
-    public static function createFor(
-        int $userId,
-        string $type,
-        string $title,
-        ?string $body = null,
-        ?string $entityType = null,
-        ?int $entityId = null,
-    ): static {
-        return static::create([
-            'user_id' => $userId,
-            'type' => $type,
-            'title' => $title,
-            'body' => $body,
-            'entity_type' => $entityType,
-            'entity_id' => $entityId,
-        ]);
     }
 }

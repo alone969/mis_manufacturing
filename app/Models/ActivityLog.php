@@ -18,11 +18,16 @@ class ActivityLog extends Model
         'description',
         'ip_address',
         'user_agent',
+        'properties',
     ];
 
-    /**
-     * Get the user who performed the action.
-     */
+    protected function casts(): array
+    {
+        return [
+            'properties' => 'array',
+        ];
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
@@ -32,22 +37,22 @@ class ActivityLog extends Model
      * Log an activity.
      */
     public static function log(
-        int $userId,
+        User $user,
         string $action,
+        string $description,
         ?string $entityType = null,
         ?int $entityId = null,
-        ?string $description = null,
-        ?string $ipAddress = null,
-        ?string $userAgent = null,
+        ?array $properties = null
     ): static {
         return static::create([
-            'user_id' => $userId,
+            'user_id' => $user->id,
             'action' => $action,
             'entity_type' => $entityType,
             'entity_id' => $entityId,
             'description' => $description,
-            'ip_address' => $ipAddress,
-            'user_agent' => $userAgent,
+            'ip_address' => request()->ip(),
+            'user_agent' => request()->userAgent(),
+            'properties' => $properties,
         ]);
     }
 }

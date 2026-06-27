@@ -2,8 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\ActivityLog;
+use App\Models\Notification;
 use App\Models\StockItem;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -14,23 +15,36 @@ class StockController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = StockItem::with('updatedBy:id,name');
+        $query = StockItem::with('updater:id,name');
 
+        // Type filter
         if ($request->has('type')) {
             $query->where('type', $request->type);
         }
 
-        if ($request->has('search')) {
-            $query->where('name', 'like', "%{$request->search}%");
+        // Low stock filter
+        if ($request->has('low_stock') && $request->low_stock === 'true') {
+            $query->lowStock();
         }
 
-        $items = $query->orderByDesc('updated_at')->get();
+        // Search
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('sku', 'like', "%{$search}%")
+                    ->orWhere('description', 'like', "%{$search}%");
+            });
+        }
+
+        $items = $query->orderBy('name')
+            ->paginate($request->get('per_page', 20));
 
         return response()->json($items);
     }
 
     /**
-     * Create a new stock item (admin only).
+     * Create a new stock item (admin).
      */
     public function store(Request $request): JsonResponse
     {
@@ -39,31 +53,43 @@ class StockController extends Controller
             'type' => 'required|in:raw_material,finished_good',
             'quantity' => 'required|numeric|min:0',
             'unit' => 'required|string|max:50',
+            'minimum_quantity' => 'nullable|numeric|min:0',
+            'description' => 'nullable|string|max:1000',
+            'sku' => 'nullable|string|unique:stock_items,sku',
         ]);
 
         $item = StockItem::create([
-            'name' => $request->name,
-            'type' => $request->type,
-            'quantity' => $request->quantity,
-            'unit' => $request->unit,
+            ...$request->only(['name', 'type', 'quantity', 'unit', 'minimum_quantity', 'description', 'sku']),
             'updated_by' => $request->user()->id,
         ]);
 
-        ActivityLog::log(
-            $request->user()->id,
-            'stock_created',
-            StockItem::class,
-            $item->id,
-            "Created stock item: {$item->name}",
-            $request->ip(),
-            $request->userAgent(),
-        );
+        $this->logActivity('create', "Created stock item: {$item->name}", StockItem::class, $item->id);
 
-        return response()->json($item->load('updatedBy:id,name'), 201);
+        // Check for low stock alert and notify admin/manager users
+        if ($item->isLowStock()) {
+            $this->logActivity('stock_alert', "Low stock alert for: {$item->name}", StockItem::class, $item->id);
+
+            // Notify admin and manager users
+            $adminsManagers = User::whereIn('role', ['admin', 'manager'])->get();
+            foreach ($adminsManagers as $adminUser) {
+                Notification::create([
+                    'user_id' => $adminUser->id,
+                    'type' => 'stock_alert',
+                    'title' => 'Low Stock Alert',
+                    'message' => "{$item->name} is below minimum stock level ({$item->quantity} {$item->unit}).",
+                    'data' => ['stock_item_id' => $item->id],
+                ]);
+            }
+        }
+
+        return response()->json([
+            'message' => 'Stock item created successfully.',
+            'item' => $item,
+        ], 201);
     }
 
     /**
-     * Update a stock item (admin only).
+     * Update a stock item (admin).
      */
     public function update(Request $request, StockItem $item): JsonResponse
     {
@@ -72,44 +98,36 @@ class StockController extends Controller
             'type' => 'sometimes|in:raw_material,finished_good',
             'quantity' => 'sometimes|numeric|min:0',
             'unit' => 'sometimes|string|max:50',
+            'minimum_quantity' => 'sometimes|numeric|min:0',
+            'description' => 'nullable|string|max:1000',
+            'sku' => 'sometimes|string|unique:stock_items,sku,' . $item->id,
         ]);
 
         $item->update(array_merge(
-            $request->only(['name', 'type', 'quantity', 'unit']),
-            ['updated_by' => $request->user()->id],
+            $request->only(['name', 'type', 'quantity', 'unit', 'minimum_quantity', 'description', 'sku']),
+            ['updated_by' => $request->user()->id]
         ));
 
-        ActivityLog::log(
-            $request->user()->id,
-            'stock_updated',
-            StockItem::class,
-            $item->id,
-            "Updated stock item: {$item->name}",
-            $request->ip(),
-            $request->userAgent(),
-        );
+        $this->logActivity('update', "Updated stock item: {$item->name}", StockItem::class, $item->id);
 
-        return response()->json($item->load('updatedBy:id,name'));
+        return response()->json([
+            'message' => 'Stock item updated successfully.',
+            'item' => $item,
+        ]);
     }
 
     /**
-     * Delete a stock item (admin only).
+     * Delete a stock item (admin).
      */
-    public function destroy(Request $request, StockItem $item): JsonResponse
+    public function destroy(StockItem $item): JsonResponse
     {
-        $name = $item->name;
+        $itemName = $item->name;
         $item->delete();
 
-        ActivityLog::log(
-            $request->user()->id,
-            'stock_deleted',
-            StockItem::class,
-            $item->id,
-            "Deleted stock item: {$name}",
-            $request->ip(),
-            $request->userAgent(),
-        );
+        $this->logActivity('delete', "Deleted stock item: {$itemName}", StockItem::class, $item->id);
 
-        return response()->json(['message' => 'Stock item deleted.']);
+        return response()->json([
+            'message' => 'Stock item deleted successfully.',
+        ]);
     }
 }

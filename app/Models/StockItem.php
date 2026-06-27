@@ -15,6 +15,9 @@ class StockItem extends Model
         'type',
         'quantity',
         'unit',
+        'minimum_quantity',
+        'description',
+        'sku',
         'updated_by',
     ];
 
@@ -22,14 +25,28 @@ class StockItem extends Model
     {
         return [
             'quantity' => 'decimal:2',
+            'minimum_quantity' => 'decimal:2',
         ];
     }
 
-    /**
-     * Get the user who last updated this item.
-     */
-    public function updatedBy(): BelongsTo
+    public function updater(): BelongsTo
     {
         return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    /**
+     * Scope to get low stock items.
+     */
+    public function scopeLowStock($query)
+    {
+        return $query->whereColumn('quantity', '<', 'minimum_quantity');
+    }
+
+    /**
+     * Check if stock is below minimum level.
+     */
+    public function isLowStock(): bool
+    {
+        return $this->quantity < $this->minimum_quantity;
     }
 }

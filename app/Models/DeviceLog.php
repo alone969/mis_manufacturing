@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Request;
 
 class DeviceLog extends Model
 {
@@ -13,9 +14,10 @@ class DeviceLog extends Model
     protected $fillable = [
         'user_id',
         'device_name',
+        'browser',
+        'operating_system',
         'ip_address',
         'user_agent',
-        'is_current_device',
         'last_login_at',
         'last_activity_at',
     ];
@@ -23,85 +25,95 @@ class DeviceLog extends Model
     protected function casts(): array
     {
         return [
-            'is_current_device' => 'boolean',
             'last_login_at' => 'datetime',
             'last_activity_at' => 'datetime',
         ];
     }
 
-    /**
-     * Get the user that owns the device log.
-     */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
     /**
-     * Record or update a device login.
+     * Scope to get logs for a specific user.
      */
-    public static function recordLogin(User $user, ?string $ipAddress = null, ?string $userAgent = null, ?string $deviceName = null): static
+    public function scopeForUser($query, int $userId)
     {
-        // Try to find existing device for this user agent
-        $device = static::where('user_id', $user->id)
-            ->where('user_agent', $userAgent)
+        return $query->where('user_id', $userId);
+    }
+
+    /**
+     * Record a device login.
+     */
+    public static function recordLogin(User $user, ?string $ip, ?string $agent): static
+    {
+        // Parse user agent
+        $browser = self::parseBrowser($agent);
+        $os = self::parseOS($agent);
+
+        // Find existing device log for this user + browser + OS combination
+        $existing = static::where('user_id', $user->id)
+            ->where('browser', $browser)
+            ->where('operating_system', $os)
             ->first();
 
-        if ($device) {
-            // Update existing device
-            $device->update([
-                'ip_address' => $ipAddress,
-                'device_name' => $deviceName,
+        if ($existing) {
+            $existing->update([
                 'last_login_at' => now(),
                 'last_activity_at' => now(),
-                'is_current_device' => true,
+                'ip_address' => $ip,
             ]);
 
-            // Mark other devices as not current
-            static::where('user_id', $user->id)
-                ->where('id', '!=', $device->id)
-                ->update(['is_current_device' => false]);
-
-            return $device;
+            return $existing;
         }
 
-        // Mark all other devices as not current
-        static::where('user_id', $user->id)
-            ->update(['is_current_device' => false]);
-
-        // Create new device record
         return static::create([
             'user_id' => $user->id,
-            'device_name' => $deviceName,
-            'ip_address' => $ipAddress,
-            'user_agent' => $userAgent,
-            'is_current_device' => true,
+            'browser' => $browser,
+            'operating_system' => $os,
+            'ip_address' => $ip,
+            'user_agent' => $agent,
             'last_login_at' => now(),
             'last_activity_at' => now(),
         ]);
     }
 
     /**
-     * Update the last activity timestamp.
+     * Parse browser name from user agent.
      */
-    public function touchActivity(): void
+    private static function parseBrowser(?string $agent): string
     {
-        $this->update(['last_activity_at' => now()]);
+        if (! $agent) {
+            return 'Unknown';
+        }
+
+        return match (true) {
+            str_contains($agent, 'Firefox') => 'Firefox',
+            str_contains($agent, 'Edg') => 'Edge',
+            str_contains($agent, 'Chrome') => 'Chrome',
+            str_contains($agent, 'Safari') && ! str_contains($agent, 'Chrome') => 'Safari',
+            str_contains($agent, 'Opera') || str_contains($agent, 'OPR') => 'Opera',
+            default => 'Other',
+        };
     }
 
     /**
-     * Scope to get current device only.
+     * Parse OS name from user agent.
      */
-    public function scopeCurrent($query)
+    private static function parseOS(?string $agent): string
     {
-        return $query->where('is_current_device', true);
-    }
+        if (! $agent) {
+            return 'Unknown';
+        }
 
-    /**
-     * Scope to get devices for a specific user.
-     */
-    public function scopeForUser($query, int $userId)
-    {
-        return $query->where('user_id', $userId);
+        return match (true) {
+            str_contains($agent, 'Windows') => 'Windows',
+            str_contains($agent, 'Mac OS') => 'macOS',
+            str_contains($agent, 'Linux') => 'Linux',
+            str_contains($agent, 'Android') => 'Android',
+            str_contains($agent, 'iPhone') || str_contains($agent, 'iPad') => 'iOS',
+            default => 'Other',
+        };
     }
 }

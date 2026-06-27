@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ActivityLogController;
+use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DeviceLogController;
@@ -9,85 +10,101 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\SalaryController;
 use App\Http\Controllers\ShiftController;
 use App\Http\Controllers\StockController;
+use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
-// ── Public auth routes ───────────────────────────────────────────────
-Route::post('/login', [AuthController::class, 'login']);
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+// Public routes
+Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:10,1');
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:5,1');
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+Route::post('/send-login-otp', [AuthController::class, 'sendLoginOtp'])->middleware('throttle:5,1');
+Route::post('/login-otp', [AuthController::class, 'loginWithOtp'])->middleware('throttle:10,1');
 
-// ── Authenticated routes ─────────────────────────────────────────────
-Route::middleware('auth')->group(function () {
-    Route::post('/logout', [AuthController::class, 'logout']);
+// Protected routes
+Route::middleware('auth:sanctum')->group(function () {
+    // Profile & Settings
     Route::get('/user', [AuthController::class, 'user']);
     Route::get('/account', [AuthController::class, 'account']);
-    Route::put('/account', [AuthController::class, 'updateProfile']);
-    Route::put('/account/password', [AuthController::class, 'changePassword']);
-    Route::put('/account/settings', [AuthController::class, 'updateSettings']);
+    Route::put('/profile', [AuthController::class, 'updateProfile']);
+    Route::put('/password', [AuthController::class, 'changePassword']);
+    Route::put('/settings', [AuthController::class, 'updateSettings']);
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::post('/send-verification-otp', [AuthController::class, 'sendVerificationOtp']);
+    Route::post('/verify-email', [AuthController::class, 'verifyEmail']);
+
+    // Global Search
+    Route::get('/search', [\App\Http\Controllers\SearchController::class, 'index']);
 
     // Dashboard
     Route::get('/dashboard', [DashboardController::class, 'index']);
 
-    // Messages (all roles)
-    Route::get('/messages', [MessageController::class, 'index']);
-    Route::post('/messages', [MessageController::class, 'store']);
-    Route::put('/messages/{message}/read', [MessageController::class, 'markRead']);
-    Route::get('/messages/unread-count', [MessageController::class, 'unreadCount']);
+    // Attendance (all authenticated users)
+    Route::post('/attendance/clock-in', [AttendanceController::class, 'clockIn']);
+    Route::post('/attendance/clock-out', [AttendanceController::class, 'clockOut']);
+    Route::get('/attendance', [AttendanceController::class, 'index']);
 
-    // Notifications
+    // Shifts (all authenticated users can view)
+    Route::get('/shifts', [ShiftController::class, 'index']);
+    Route::get('/shifts/schedule', [ShiftController::class, 'schedule']);
+
+    // Stock (all authenticated users can view)
+    Route::get('/stock', [StockController::class, 'index']);
+
+    // Salary (employees see own)
+    Route::get('/salaries', [SalaryController::class, 'index']);
+
+    // Messages (all authenticated users)
+    Route::get('/messages', [MessageController::class, 'index']);
+    Route::get('/messages/unread-count', [MessageController::class, 'unreadCount']);
+    Route::post('/messages', [MessageController::class, 'store']);
+    Route::get('/messages/{message}', [MessageController::class, 'show']);
+    Route::delete('/messages/{message}', [MessageController::class, 'destroy']);
+
+    // Notifications (all authenticated users)
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
     Route::put('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
     Route::put('/notifications/read-all', [NotificationController::class, 'markAllRead']);
 
-    // Device logs (users see own devices)
+    // Device Logs (own)
     Route::get('/device-logs', [DeviceLogController::class, 'index']);
 
-    // Users (for messaging recipient list)
-    Route::get('/users', [\App\Http\Controllers\UserController::class, 'forMessaging']);
+    // Manager & Admin routes
+    Route::middleware('role:manager,admin')->group(function () {
+        // Shift Management
+        Route::post('/shifts', [ShiftController::class, 'store']);
+        Route::put('/shifts/{shift}', [ShiftController::class, 'update']);
+        Route::post('/shifts/assign', [ShiftController::class, 'assign']);
+        Route::delete('/shifts/assignments/{assignment}', [ShiftController::class, 'unassign']);
 
-    // Stock (read-only for employees/managers)
-    Route::get('/stock', [StockController::class, 'index']);
+        // View team members
+        Route::get('/employees', [UserController::class, 'index']);
+    });
 
-    // Shifts (all roles can view; manager/admin can manage)
-    Route::get('/shifts', [ShiftController::class, 'index']);
-    Route::get('/shifts/assignments/{date?}', [ShiftController::class, 'assignments']);
-    Route::post('/shifts/{assignment}/clock-in', [ShiftController::class, 'clockIn']);
-    Route::post('/shifts/{assignment}/clock-out', [ShiftController::class, 'clockOut']);
+    // Admin only routes
+    Route::middleware('role:admin')->group(function () {
+        // User Management
+        Route::post('/employees', [UserController::class, 'store']);
+        Route::get('/employees/{user}', [UserController::class, 'show']);
+        Route::put('/employees/{user}', [UserController::class, 'update']);
+        Route::delete('/employees/{user}', [UserController::class, 'destroy']);
+        Route::put('/employees/{user}/toggle-status', [UserController::class, 'toggleStatus']);
 
-    // Salaries (employees see own, admin sees all)
-    Route::get('/salaries', [SalaryController::class, 'index']);
-});
+        // Shift Management (full)
+        Route::delete('/shifts/{shift}', [ShiftController::class, 'destroy']);
 
-// ── Manager & Admin routes ───────────────────────────────────────────
-Route::middleware(['auth', 'role:manager,admin'])->group(function () {
-    Route::post('/shifts', [ShiftController::class, 'store']);
-    Route::put('/shifts/{shift}', [ShiftController::class, 'update']);
-    Route::delete('/shifts/{shift}', [ShiftController::class, 'destroy']);
-    Route::post('/shifts/{shift}/assign', [ShiftController::class, 'assign']);
-    Route::delete('/shifts/{shift}/assignments/{assignment}', [ShiftController::class, 'unassign']);
-});
+        // Stock Management
+        Route::post('/stock', [StockController::class, 'store']);
+        Route::put('/stock/{item}', [StockController::class, 'update']);
+        Route::delete('/stock/{item}', [StockController::class, 'destroy']);
 
-// ── Admin-only routes ────────────────────────────────────────────────
-Route::middleware(['auth', 'role:admin'])->group(function () {
-    // User management
-    Route::get('/admin/users', [\App\Http\Controllers\UserController::class, 'index']);
-    Route::put('/admin/users/{user}/role', [\App\Http\Controllers\UserController::class, 'updateRole']);
+        // Salary Management
+        Route::post('/salaries/process', [SalaryController::class, 'process']);
+        Route::patch('/salaries/{salary}/pay', [SalaryController::class, 'pay']);
 
-    // Stock management (CRUD)
-    Route::post('/stock', [StockController::class, 'store']);
-    Route::put('/stock/{item}', [StockController::class, 'update']);
-    Route::delete('/stock/{item}', [StockController::class, 'destroy']);
-
-    // Salary management
-    Route::post('/salaries', [SalaryController::class, 'store']);
-    Route::put('/salaries/{salary}/pay', [SalaryController::class, 'markPaid']);
-    Route::get('/salaries/summary', [SalaryController::class, 'summary']);
-
-    // Activity log
-    Route::get('/activity-logs', [ActivityLogController::class, 'index']);
-
-    // Device logs (admin sees all)
-    Route::get('/admin/device-logs', [DeviceLogController::class, 'all']);
+        // Logs
+        Route::get('/activity-logs', [ActivityLogController::class, 'index']);
+        Route::get('/device-logs/all', [DeviceLogController::class, 'all']);
+    });
 });

@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ActivityLog;
-use App\Models\Shift;
+use App\Models\Salary;
 use App\Models\ShiftAssignment;
 use App\Models\StockItem;
 use App\Models\User;
@@ -12,6 +12,67 @@ use Illuminate\Http\Request;
 
 class DashboardController extends Controller
 {
+    /**
+     * Render the admin portal view with comprehensive data.
+     */
+    public function adminPortal(Request $request)
+    {
+        $user = $request->user();
+        $today = now()->toDateString();
+
+        return view('admin.portal', [
+            'user' => $user,
+            'stats' => $this->getStats($user, $today),
+            'todayShifts' => ShiftAssignment::with(['shift:id,name,start_time,end_time', 'user:id,name'])
+                ->where('date', $today)->get(),
+            'stockAlerts' => StockItem::where('quantity', '<', 10)->get(),
+            'recentActivity' => ActivityLog::with('user:id,name')->latest()->limit(15)->get(),
+            'employees' => User::whereIn('role', ['employee', 'manager'])->orderBy('name')->take(10)->get(),
+        ]);
+    }
+
+    /**
+     * Render the web dashboard view with data.
+     */
+    public function web(Request $request)
+    {
+        $user = $request->user();
+        $today = now()->toDateString();
+
+        return view('dashboard', [
+            'user' => $user,
+            'stats' => $this->getStats($user, $today),
+            'todayShifts' => \App\Models\ShiftAssignment::with(['shift:id,name,start_time,end_time', 'user:id,name'])
+                ->where('date', $today)->get(),
+            'stockAlerts' => \App\Models\StockItem::where('quantity', '<', 10)->get(),
+            'recentActivity' => ActivityLog::with('user:id,name')->latest()->limit(10)->get(),
+        ]);
+    }
+
+    private function getStats($user, $today): array
+    {
+        return match ($user->role) {
+            'admin' => [
+                'total_employees' => \App\Models\User::where('role', 'employee')->count(),
+                'total_managers' => \App\Models\User::where('role', 'manager')->count(),
+                'total_admins' => \App\Models\User::where('role', 'admin')->count(),
+                'active_shifts_today' => \App\Models\ShiftAssignment::where('date', $today)->where('status', '!=', 'absent')->count(),
+                'total_stock_items' => \App\Models\StockItem::sum('quantity'),
+                'pending_salaries' => \App\Models\Salary::where('status', 'pending')->count(),
+            ],
+            'manager' => [
+                'team_members' => \App\Models\User::where('role', 'employee')->count(),
+                'active_shifts_today' => \App\Models\ShiftAssignment::where('date', $today)->where('status', '!=', 'absent')->count(),
+                'total_stock_items' => \App\Models\StockItem::sum('quantity'),
+            ],
+            default => [
+                'today_shift' => \App\Models\ShiftAssignment::where('user_id', $user->id)->where('date', $today)->first()?->shift?->name ?? 'No shift today',
+                'attendance_this_week' => \App\Models\ShiftAssignment::where('user_id', $user->id)->where('date', '>=', now()->startOfWeek()->toDateString())->where('status', '!=', 'absent')->count(),
+                'total_shifts_this_week' => \App\Models\ShiftAssignment::where('user_id', $user->id)->where('date', '>=', now()->startOfWeek()->toDateString())->count(),
+            ],
+        };
+    }
+
     /**
      * Get dashboard data based on user role.
      */
@@ -41,7 +102,7 @@ class DashboardController extends Controller
                     ->where('status', '!=', 'absent')
                     ->count(),
                 'total_stock_items' => StockItem::sum('quantity'),
-                'pending_salaries' => \App\Models\Salary::where('status', 'pending')->count(),
+                'pending_salaries' => Salary::where('status', 'pending')->count(),
             ],
             'recent_activity' => ActivityLog::with('user:id,name')
                 ->latest()
@@ -159,8 +220,8 @@ class DashboardController extends Controller
                     'start' => $todayAssignment->shift->start_time,
                     'end' => $todayAssignment->shift->end_time,
                     'status' => $todayAssignment->status,
-                    'clock_in' => $todayAssignment->clock_in?->format('H:i'),
-                    'clock_out' => $todayAssignment->clock_out?->format('H:i'),
+                    'clock_in' => $todayAssignment->clock_in instanceof \Carbon\Carbon ? $todayAssignment->clock_in->format('H:i') : null,
+                    'clock_out' => $todayAssignment->clock_out instanceof \Carbon\Carbon ? $todayAssignment->clock_out->format('H:i') : null,
                     'assignment_id' => $todayAssignment->id,
                 ]
                 : null,

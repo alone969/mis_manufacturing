@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\ActivityLog;
+use App\Models\Notification;
 use App\Models\Salary;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -27,22 +27,37 @@ class SalaryController extends Controller
             $query->where('status', $request->status);
         }
 
+        if ($request->has('user_id')) {
+            $query->where('user_id', $request->user_id);
+        }
+
         $salaries = $query->orderByDesc('period_start')->get();
 
         return response()->json($salaries);
     }
 
     /**
-     * Create a salary record (admin only).
+     * Process salary for an employee (admin).
      */
-    public function store(Request $request): JsonResponse
+    public function process(Request $request): JsonResponse
     {
         $request->validate([
             'user_id' => 'required|exists:users,id',
             'amount' => 'required|numeric|min:0',
             'period_start' => 'required|date',
             'period_end' => 'required|date|after_or_equal:period_start',
+            'notes' => 'nullable|string|max:1000',
         ]);
+
+        // Check if salary already exists for this period
+        $existing = Salary::where('user_id', $request->user_id)
+            ->where('period_start', $request->period_start)
+            ->where('period_end', $request->period_end)
+            ->first();
+
+        if ($existing) {
+            return $this->errorResponse('Salary already processed for this period.', 422);
+        }
 
         $salary = Salary::create([
             'user_id' => $request->user_id,
@@ -50,55 +65,43 @@ class SalaryController extends Controller
             'period_start' => $request->period_start,
             'period_end' => $request->period_end,
             'status' => 'pending',
+            'processed_by' => $request->user()->id,
+            'notes' => $request->notes,
         ]);
 
-        ActivityLog::log(
-            $request->user()->id,
-            'salary_created',
-            Salary::class,
-            $salary->id,
-            "Created salary record for user #{$request->user_id}: \${$request->amount}",
-            $request->ip(),
-            $request->userAgent(),
-        );
+        $this->logActivity('salary_process', "Processed salary for user ID: {$request->user_id}", Salary::class, $salary->id);
 
-        return response()->json($salary->load('user:id,name,email'), 201);
+        // Create notification for the employee
+        Notification::create([
+            'user_id' => $request->user_id,
+            'type' => 'salary_processed',
+            'title' => 'Salary Processed',
+            'message' => 'Your salary for ' . $request->period_start . ' to ' . $request->period_end . ' has been processed.',
+            'data' => ['salary_id' => $salary->id, 'amount' => $request->amount],
+        ]);
+
+        return response()->json([
+            'message' => 'Salary processed successfully.',
+            'salary' => $salary->load('user:id,name,email'),
+        ], 201);
     }
 
     /**
-     * Mark a salary as paid (admin only).
+     * Mark salary as paid (admin).
      */
-    public function markPaid(Request $request, Salary $salary): JsonResponse
+    public function pay(Request $request, Salary $salary): JsonResponse
     {
-        if ($salary->status === 'paid') {
-            return response()->json(['message' => 'Salary is already paid.'], 422);
+        $result = $salary->markAsPaid();
+
+        if (! $result) {
+            return $this->errorResponse('Salary has already been paid or failed.', 422);
         }
 
-        $salary->markAsPaid($request->user()->id);
+        $this->logActivity('salary_pay', "Marked salary as paid for user ID: {$salary->user_id}", Salary::class, $salary->id);
 
-        ActivityLog::log(
-            $request->user()->id,
-            'salary_paid',
-            Salary::class,
-            $salary->id,
-            "Marked salary as paid for user #{$salary->user_id}: \${$salary->amount}",
-            $request->ip(),
-            $request->userAgent(),
-        );
-
-        return response()->json($salary->fresh()->load('user:id,name,email', 'processor:id,name'));
-    }
-
-    /**
-     * Get salary summary stats (admin only).
-     */
-    public function summary(): JsonResponse
-    {
         return response()->json([
-            'total_pending' => Salary::where('status', 'pending')->sum('amount'),
-            'total_paid' => Salary::where('status', 'paid')->sum('amount'),
-            'pending_count' => Salary::where('status', 'pending')->count(),
-            'paid_count' => Salary::where('status', 'paid')->count(),
+            'message' => 'Salary marked as paid.',
+            'salary' => $salary->fresh()->load('user:id,name,email'),
         ]);
     }
 }

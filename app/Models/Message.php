@@ -16,46 +16,44 @@ class Message extends Model
         'subject',
         'body',
         'read_at',
+        'is_deleted_by_sender',
+        'is_deleted_by_receiver',
     ];
 
     protected function casts(): array
     {
         return [
             'read_at' => 'datetime',
+            'is_deleted_by_sender' => 'boolean',
+            'is_deleted_by_receiver' => 'boolean',
         ];
     }
 
-    /**
-     * Get the sender.
-     */
     public function sender(): BelongsTo
     {
         return $this->belongsTo(User::class, 'sender_id');
     }
 
-    /**
-     * Get the receiver.
-     */
     public function receiver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'receiver_id');
     }
 
     /**
-     * Mark message as read.
+     * Mark the message as read.
      */
     public function markAsRead(): void
     {
-        if (is_null($this->read_at)) {
+        if (! $this->read_at) {
             $this->update(['read_at' => now()]);
         }
     }
 
     /**
-     * Check if message is unread.
+     * Check if the message is read.
      */
-    public function isUnread(): bool
+    public function isRead(): bool
     {
-        return is_null($this->read_at);
+        return $this->read_at !== null;
     }
 }

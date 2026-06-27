@@ -34,12 +34,13 @@ class AuthController extends Controller
             'onboarding_status' => 'pending',
         ]);
 
-        // Log the user in
+        $user->assignRole('employee');
+
         Auth::login($user);
         $request->session()->regenerate();
 
-        // Record device login
         DeviceLog::recordLogin($user, $request->ip(), $request->userAgent());
+        $this->logActivity('register', 'New user registered');
 
         return response()->json([
             'user' => [
@@ -116,6 +117,8 @@ class AuthController extends Controller
 
         $user->update(['password' => $request->password]);
 
+        $this->logActivity('password_change', 'Password changed');
+
         return response()->json([
             'message' => 'Password changed successfully.',
         ]);
@@ -165,11 +168,9 @@ class AuthController extends Controller
             ]);
         }
 
-        // Generate password reset OTP
         $result = Otp::generate($user, 'password_reset', 6, 10);
 
         // TODO: In production, send email with the code via a mailer.
-        // $result['code'] contains the plain-text OTP — do NOT expose it in the response.
         return response()->json([
             'message' => 'If an account exists with that email, a reset code has been sent.',
         ]);
@@ -202,8 +203,9 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Update the password (cast as 'hashed' in model)
         $user->update(['password' => $request->password]);
+
+        $this->logActivity('password_reset', 'Password reset via OTP');
 
         return response()->json([
             'message' => 'Password has been reset successfully.',
@@ -232,16 +234,13 @@ class AuthController extends Controller
             ]);
         }
 
-        // Log successful login
         LoginLog::logSuccess($user, $request->ip(), $request->userAgent());
 
-        // Log the user in via session
         Auth::login($user);
-
         $request->session()->regenerate();
 
-        // Record device login
         DeviceLog::recordLogin($user, $request->ip(), $request->userAgent());
+        $this->logActivity('login', 'User logged in');
 
         return response()->json([
             'user' => [
@@ -258,6 +257,8 @@ class AuthController extends Controller
      */
     public function logout(Request $request): JsonResponse
     {
+        $this->logActivity('logout', 'User logged out');
+
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
@@ -277,6 +278,124 @@ class AuthController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role,
+        ]);
+    }
+
+    /**
+     * Send email verification OTP.
+     */
+    public function sendVerificationOtp(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if ($user->is_email_verified) {
+            return response()->json([
+                'message' => 'Email is already verified.',
+            ]);
+        }
+
+        $result = Otp::generate($user, 'email_verification', 6, 15);
+
+        // TODO: In production, send email with the code.
+        return response()->json([
+            'message' => 'Verification code has been sent to your email.',
+        ]);
+    }
+
+    /**
+     * Verify email with OTP code.
+     */
+    public function verifyEmail(Request $request): JsonResponse
+    {
+        $request->validate([
+            'code' => 'required|string|size:6',
+        ]);
+
+        $user = $request->user();
+
+        $verified = Otp::verify($user, $request->code, 'email_verification');
+
+        if (! $verified) {
+            return response()->json([
+                'message' => 'Invalid or expired verification code.',
+            ], 422);
+        }
+
+        $user->update(['is_email_verified' => true]);
+
+        $this->logActivity('email_verified', 'Email verified successfully');
+
+        return response()->json([
+            'message' => 'Email verified successfully.',
+        ]);
+    }
+
+    /**
+     * Send login OTP.
+     */
+    public function sendLoginOtp(Request $request): JsonResponse
+    {
+        $request->validate([
+            'email' => 'required|email',
+        ]);
+
+        $user = User::where('email', $request->email)->first();
+
+        if (! $user) {
+            return response()->json([
+                'message' => 'If an account exists with that email, a login code has been sent.',
+            ]);
+        }
+
+        $result = Otp::generate($user, 'login', 6, 5);
+
+        // TODO: In production, send email with the code.
+        return response()->json([
+            'message' => 'If an account exists with that email, a login code has been sent.',
+        ]);
+    }
+
+    /**
+     * Login with OTP code.
+     */
+    public function loginWithOtp(Request $request): JsonResponse
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'code' => 'required|string|size:6',
+        ]);
+
+        $user = User::where('email', $request->email)->first();
+
+        if (! $user) {
+            return response()->json([
+                'message' => 'Invalid login code.',
+            ], 422);
+        }
+
+        $verified = Otp::verify($user, $request->code, 'login');
+
+        if (! $verified) {
+            return response()->json([
+                'message' => 'Invalid or expired login code.',
+            ], 422);
+        }
+
+        LoginLog::logSuccess($user, $request->ip(), $request->userAgent());
+
+        Auth::login($user);
+        $request->session()->regenerate();
+
+        DeviceLog::recordLogin($user, $request->ip(), $request->userAgent());
+        $this->logActivity('login', 'User logged in via OTP');
+
+        return response()->json([
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+            ],
         ]);
     }
 }

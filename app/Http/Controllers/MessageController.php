@@ -17,8 +17,10 @@ class MessageController extends Controller
         $box = $request->get('box', 'inbox');
 
         $query = match ($box) {
-            'sent' => Message::where('sender_id', $user->id),
-            default => Message::where('receiver_id', $user->id),
+            'sent' => Message::where('sender_id', $user->id)
+                ->where('is_deleted_by_sender', false),
+            default => Message::where('receiver_id', $user->id)
+                ->where('is_deleted_by_receiver', false),
         };
 
         $messages = $query->with('sender:id,name', 'receiver:id,name')
@@ -46,17 +48,51 @@ class MessageController extends Controller
             'body' => $request->body,
         ]);
 
+        $this->logActivity('message_send', "Sent message: {$message->subject}", Message::class, $message->id);
+
         return response()->json($message->load('sender:id,name', 'receiver:id,name'), 201);
     }
 
     /**
-     * Mark a message as read.
+     * Get a single message.
      */
-    public function markRead(Message $message): JsonResponse
+    public function show(Message $message): JsonResponse
     {
-        $message->markAsRead();
+        $user = request()->user();
 
-        return response()->json($message->fresh());
+        // Check if user is sender or receiver
+        if ($message->sender_id !== $user->id && $message->receiver_id !== $user->id) {
+            return $this->errorResponse('Unauthorized.', 403);
+        }
+
+        // Mark as read if receiver
+        if ($message->receiver_id === $user->id) {
+            $message->markAsRead();
+        }
+
+        return response()->json($message->load('sender:id,name', 'receiver:id,name'));
+    }
+
+    /**
+     * Delete a message (soft delete for sender or receiver).
+     */
+    public function destroy(Message $message): JsonResponse
+    {
+        $user = request()->user();
+
+        if ($message->sender_id === $user->id) {
+            $message->update(['is_deleted_by_sender' => true]);
+        } elseif ($message->receiver_id === $user->id) {
+            $message->update(['is_deleted_by_receiver' => true]);
+        } else {
+            return $this->errorResponse('Unauthorized.', 403);
+        }
+
+        $this->logActivity('message_delete', "Deleted message: {$message->subject}", Message::class, $message->id);
+
+        return response()->json([
+            'message' => 'Message deleted successfully.',
+        ]);
     }
 
     /**

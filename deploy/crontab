@@ -1,0 +1,12 @@
+# MIS Manufacturing - Production Crontab
+# Install: crontab -e
+# Then paste the following lines:
+
+# Laravel Scheduler - runs every minute
+* * * * * cd /var/www/mis_manufacturing && php artisan schedule:run >> /dev/null 2>&1
+
+# Queue Worker (alternative to Horizon - use one or the other)
+# */5 * * * * cd /var/www/mis_manufacturing && php artisan queue:work --sleep=3 --tries=3 --max-time=3600 >> /dev/null 2>&1
+
+# If using Horizon instead:
+# * * * * * cd /var/www/mis_manufacturing && php artisan horizon >> /dev/null 2>&1

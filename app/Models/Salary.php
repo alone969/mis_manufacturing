@@ -18,6 +18,7 @@ class Salary extends Model
         'status',
         'paid_at',
         'processed_by',
+        'notes',
     ];
 
     protected function casts(): array
@@ -30,17 +31,11 @@ class Salary extends Model
         ];
     }
 
-    /**
-     * Get the employee this salary belongs to.
-     */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    /**
-     * Get the admin who processed this salary.
-     */
     public function processor(): BelongsTo
     {
         return $this->belongsTo(User::class, 'processed_by');
@@ -49,12 +44,17 @@ class Salary extends Model
     /**
      * Mark salary as paid.
      */
-    public function markAsPaid(int $processedBy): void
+    public function markAsPaid(): bool
     {
+        if ($this->status !== 'pending') {
+            return false;
+        }
+
         $this->update([
             'status' => 'paid',
             'paid_at' => now(),
-            'processed_by' => $processedBy,
         ]);
+
+        return true;
     }
 }

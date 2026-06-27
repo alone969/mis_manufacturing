@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -13,117 +12,68 @@ class Otp extends Model
 
     protected $fillable = [
         'user_id',
-        'code_hash',
+        'code',
         'type',
         'is_used',
         'expires_at',
-        'used_at',
-    ];
-
-    protected $hidden = [
-        'code_hash',
     ];
 
     protected function casts(): array
     {
         return [
-            'expires_at' => 'datetime',
-            'used_at' => 'datetime',
             'is_used' => 'boolean',
+            'expires_at' => 'datetime',
         ];
     }
 
-    /**
-     * Get the user that owns the OTP.
-     */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
     /**
-     * Generate a new OTP code for a user.
-     *
-     * @param int $length Length of the OTP code
-     * @param int $expiryMinutes Minutes until OTP expires
+     * Generate an OTP for the given user and type.
      */
-    public static function generate(User $user, string $type = 'login', int $length = 6, int $expiryMinutes = 5): array
+    public static function generate(User $user, string $type, int $length = 6, int $ttlMinutes = 10): array
     {
-        // Invalidate any existing OTPs of this type for the user
+        // Invalidate any existing OTPs of the same type
         static::where('user_id', $user->id)
             ->where('type', $type)
             ->where('is_used', false)
             ->update(['is_used' => true]);
 
-        // Generate numeric code
-        $code = '';
-        for ($i = 0; $i < $length; $i++) {
-            $code .= random_int(0, 9);
-        }
+        $code = str_pad((string) random_int(0, 999999), $length, '0', STR_PAD_LEFT);
 
-        // Hash the code for storage
-        $codeHash = hash('sha256', $code);
-
-        // Create OTP record
         $otp = static::create([
             'user_id' => $user->id,
-            'code_hash' => $codeHash,
+            'code' => $code,
             'type' => $type,
             'is_used' => false,
-            'expires_at' => Carbon::now()->addMinutes($expiryMinutes),
+            'expires_at' => now()->addMinutes($ttlMinutes),
         ]);
 
-        return [
-            'otp' => $otp,
-            'code' => $code, // Return plain code for sending via email
-        ];
+        return ['otp' => $otp, 'code' => $code];
     }
 
     /**
      * Verify an OTP code.
      */
-    public static function verify(User $user, string $code, string $type = 'login'): bool
+    public static function verify(User $user, string $code, string $type): bool
     {
         $otp = static::where('user_id', $user->id)
+            ->where('code', $code)
             ->where('type', $type)
             ->where('is_used', false)
-            ->where('expires_at', '>', Carbon::now())
+            ->where('expires_at', '>', now())
             ->latest()
             ->first();
 
-        if (!$otp) {
+        if (! $otp) {
             return false;
         }
 
-        $codeHash = hash('sha256', $code);
-
-        if (!hash_equals($otp->code_hash, $codeHash)) {
-            return false;
-        }
-
-        // Mark OTP as used
-        $otp->update([
-            'is_used' => true,
-            'used_at' => Carbon::now(),
-        ]);
+        $otp->update(['is_used' => true]);
 
         return true;
-    }
-
-    /**
-     * Check if OTP is expired.
-     */
-    public function isExpired(): bool
-    {
-        return $this->expires_at->isPast();
-    }
-
-    /**
-     * Scope to get valid (unused and not expired) OTPs.
-     */
-    public function scopeValid($query)
-    {
-        return $query->where('is_used', false)
-            ->where('expires_at', '>', Carbon::now());
     }
 }

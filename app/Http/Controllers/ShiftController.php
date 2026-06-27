@@ -2,9 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\ActivityLog;
+use App\Models\Notification;
 use App\Models\Shift;
 use App\Models\ShiftAssignment;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -13,10 +14,9 @@ class ShiftController extends Controller
     /**
      * List all shifts.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $shifts = Shift::with('creator:id,name')
-            ->withCount('assignments')
+        $shifts = Shift::with('creator:id,name', 'assignments.user:id,name')
             ->orderByDesc('created_at')
             ->get();
 
@@ -24,7 +24,7 @@ class ShiftController extends Controller
     }
 
     /**
-     * Create a new shift.
+     * Create a new shift (admin/manager).
      */
     public function store(Request $request): JsonResponse
     {
@@ -41,21 +41,16 @@ class ShiftController extends Controller
             'created_by' => $request->user()->id,
         ]);
 
-        ActivityLog::log(
-            $request->user()->id,
-            'shift_created',
-            Shift::class,
-            $shift->id,
-            "Created shift: {$shift->name}",
-            $request->ip(),
-            $request->userAgent(),
-        );
+        $this->logActivity('create', "Created shift: {$shift->name}", Shift::class, $shift->id);
 
-        return response()->json($shift->load('creator:id,name'), 201);
+        return response()->json([
+            'message' => 'Shift created successfully.',
+            'shift' => $shift,
+        ], 201);
     }
 
     /**
-     * Update a shift.
+     * Update a shift (admin/manager).
      */
     public function update(Request $request, Shift $shift): JsonResponse
     {
@@ -67,148 +62,115 @@ class ShiftController extends Controller
 
         $shift->update($request->only(['name', 'start_time', 'end_time']));
 
-        ActivityLog::log(
-            $request->user()->id,
-            'shift_updated',
-            Shift::class,
-            $shift->id,
-            "Updated shift: {$shift->name}",
-            $request->ip(),
-            $request->userAgent(),
-        );
+        $this->logActivity('update', "Updated shift: {$shift->name}", Shift::class, $shift->id);
 
-        return response()->json($shift->load('creator:id,name'));
+        return response()->json([
+            'message' => 'Shift updated successfully.',
+            'shift' => $shift,
+        ]);
     }
 
     /**
-     * Delete a shift.
+     * Delete a shift (admin).
      */
-    public function destroy(Request $request, Shift $shift): JsonResponse
+    public function destroy(Shift $shift): JsonResponse
     {
-        $name = $shift->name;
+        $shiftName = $shift->name;
         $shift->delete();
 
-        ActivityLog::log(
-            $request->user()->id,
-            'shift_deleted',
-            Shift::class,
-            $shift->id,
-            "Deleted shift: {$name}",
-            $request->ip(),
-            $request->userAgent(),
-        );
+        $this->logActivity('delete', "Deleted shift: {$shiftName}", Shift::class, $shift->id);
 
-        return response()->json(['message' => 'Shift deleted successfully.']);
+        return response()->json([
+            'message' => 'Shift deleted successfully.',
+        ]);
     }
 
     /**
-     * Assign an employee to a shift.
+     * Assign employees to a shift (admin/manager).
      */
-    public function assign(Request $request, Shift $shift): JsonResponse
+    public function assign(Request $request): JsonResponse
     {
         $request->validate([
-            'user_id' => 'required|exists:users,id',
+            'shift_id' => 'required|exists:shifts,id',
+            'user_ids' => 'required|array',
+            'user_ids.*' => 'exists:users,id',
             'date' => 'required|date',
         ]);
 
-        $existing = ShiftAssignment::where('shift_id', $shift->id)
-            ->where('user_id', $request->user_id)
-            ->where('date', $request->date)
-            ->exists();
-
-        if ($existing) {
-            return response()->json(['message' => 'Employee is already assigned to this shift for this date.'], 422);
+        $assigned = [];
+        foreach ($request->user_ids as $userId) {
+            $assignment = ShiftAssignment::firstOrCreate(
+                [
+                    'user_id' => $userId,
+                    'shift_id' => $request->shift_id,
+                    'date' => $request->date,
+                ],
+                ['status' => 'assigned']
+            );
+            $assigned[] = $assignment;
         }
 
-        $assignment = ShiftAssignment::create([
-            'shift_id' => $shift->id,
-            'user_id' => $request->user_id,
-            'date' => $request->date,
-            'status' => 'scheduled',
-        ]);
+        $this->logActivity('assign', 'Assigned employees to shift');
 
-        ActivityLog::log(
-            $request->user()->id,
-            'shift_assigned',
-            ShiftAssignment::class,
-            $assignment->id,
-            "Assigned user #{$request->user_id} to shift: {$shift->name} on {$request->date}",
-            $request->ip(),
-            $request->userAgent(),
-        );
+        // Create notifications for assigned employees
+        foreach ($request->user_ids as $userId) {
+            Notification::create([
+                'user_id' => $userId,
+                'type' => 'shift_assigned',
+                'title' => 'Shift Assigned',
+                'message' => 'You have been assigned to a shift on ' . $request->date,
+                'data' => ['shift_id' => $request->shift_id, 'date' => $request->date],
+            ]);
+        }
 
-        return response()->json($assignment->load('shift:name', 'user:id,name'), 201);
+        return response()->json([
+            'message' => 'Employees assigned successfully.',
+            'assignments' => $assigned,
+        ], 201);
     }
 
     /**
-     * Remove an assignment.
+     * Remove a shift assignment.
      */
-    public function unassign(Request $request, Shift $shift, ShiftAssignment $assignment): JsonResponse
+    public function unassign(ShiftAssignment $assignment): JsonResponse
     {
         $assignment->delete();
 
-        return response()->json(['message' => 'Assignment removed.']);
+        $this->logActivity('unassign', 'Removed employee from shift');
+
+        return response()->json([
+            'message' => 'Assignment removed successfully.',
+        ]);
     }
 
     /**
-     * Get assignments for a specific date.
+     * Get shift schedule (daily, weekly, monthly).
      */
-    public function assignments(Request $request, ?string $date = null): JsonResponse
+    public function schedule(Request $request): JsonResponse
     {
-        $date = $date ?? now()->toDateString();
+        $request->validate([
+            'period' => 'sometimes|in:daily,weekly,monthly',
+            'date' => 'sometimes|date',
+        ]);
 
-        $assignments = ShiftAssignment::with('shift:name,start_time,end_time', 'user:id,name')
-            ->where('date', $date)
+        $date = $request->get('date', now()->toDateString());
+        $period = $request->get('period', 'weekly');
+
+        $query = ShiftAssignment::with('shift:name,start_time,end_time', 'user:id,name,role');
+
+        match ($period) {
+            'daily' => $query->whereDate('date', $date),
+            'weekly' => $query->whereBetween('date', [
+                now()->parse($date)->startOfWeek()->toDateString(),
+                now()->parse($date)->endOfWeek()->toDateString(),
+            ]),
+            'monthly' => $query->whereMonth('date', now()->parse($date)->month)
+                ->whereYear('date', now()->parse($date)->year),
+        };
+
+        $assignments = $query->orderBy('date')
             ->get();
 
         return response()->json($assignments);
-    }
-
-    /**
-     * Clock in for a shift assignment.
-     */
-    public function clockIn(Request $request, ShiftAssignment $assignment): JsonResponse
-    {
-        if ($assignment->status !== 'scheduled') {
-            return response()->json(['message' => 'Cannot clock in — already ' . $assignment->status . '.'], 422);
-        }
-
-        $assignment->clockIn();
-
-        ActivityLog::log(
-            $request->user()->id,
-            'clock_in',
-            ShiftAssignment::class,
-            $assignment->id,
-            'Clocked in for shift on ' . $assignment->date->toDateString(),
-            $request->ip(),
-            $request->userAgent(),
-        );
-
-        return response()->json($assignment->fresh()->load('shift:name'));
-    }
-
-    /**
-     * Clock out for a shift assignment.
-     */
-    public function clockOut(Request $request, ShiftAssignment $assignment): JsonResponse
-    {
-        if ($assignment->status !== 'clocked_in') {
-            return response()->json(['message' => 'Cannot clock out — not clocked in.'], 422);
-        }
-
-        $assignment->clockOut();
-
-        ActivityLog::log(
-            $request->user()->id,
-            'clock_out',
-            ShiftAssignment::class,
-            $assignment->id,
-            'Clocked out for shift on ' . $assignment->date->toDateString(),
-            $request->ip(),
-            $request->userAgent(),
-        );
-
-        return response()->json($assignment->fresh()->load('shift:name'));
     }
 }
